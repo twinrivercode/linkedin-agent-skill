@@ -33,11 +33,36 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LEX = os.path.join(HERE, "slop.json")
 
 SENT_RE = re.compile(r"[^.!?\n]+[.!?]*")
-WORD_RE = re.compile(r"[A-Za-z']+")
-CONTRACTIONS = re.compile(r"\b\w+'(?:s|t|re|ve|ll|d|m)\b", re.IGNORECASE)
-PRONOUNS = re.compile(r"\b(i|me|my|mine|we|us|our|you|your)\b", re.IGNORECASE)
-NUMBERS = re.compile(r"\b\d[\d,.]*%?\b|\$\d")
-PROPER = re.compile(r"(?<![.!?]\s)(?<!^)\b[A-Z][a-z]{2,}\b", re.MULTILINE)
+WORD_RE = re.compile(r"[A-Za-zÄÖÜäöüß']+")
+# German has no mandatory contractions, so colloquial forms count too:
+# "geht's", "ich mach", "find ich", "freu mich", "nix".
+CONTRACTIONS = re.compile(
+    r"\b\w+'s\b"
+    r"|\bich\s+(?:hab|mach|find|glaub|denk|freu|sag|schreib|brauch|geh|komm|seh)\b"
+    r"|\b(?:hab|mach|find|glaub|denk|sag)\s+ich\b"
+    r"|\bfreu\s+mich\b"
+    r"|\b(?:nix|nen|nem|nee)\b",
+    re.IGNORECASE)
+PRONOUNS = re.compile(
+    r"\b(ich|mich|mir|mein(?:e[mnrs]?)?|wir|uns|unser(?:e[mnrs]?)?"
+    r"|du|dich|dir|dein(?:e[mnrs]?)?|euch|euer|eure[mnrs]?)\b",
+    re.IGNORECASE)
+NUMBERS = re.compile(r"\b\d[\d,.]*\s?(?:%|€)?|[$€]\d")
+# Every German noun is capitalised, so a capital alone proves nothing. Count
+# what nouns rarely do: adjacent capitalised words mid-sentence, hyphenated
+# names, acronyms, CamelCase and domains, plus months and weekdays. Single-word
+# names are invisible to a regex, so they go in the "names" list in slop.json.
+_CAP = r"[A-ZÄÖÜ][a-zäöüß]+"
+PROPER = re.compile(
+    rf"(?<![.!?]\s)(?<!^)(?<![„\"])\b{_CAP}\s+{_CAP}\b"
+    rf"|\b{_CAP}-{_CAP}\b"
+    r"|\b[A-ZÄÖÜ]{2,}\b"
+    r"|\b[A-Za-z]+[a-z][A-Z][a-z]\w*\b"
+    r"|\b[\w-]+\.(?:de|com|io|org|net|ai)\b"
+    r"|\b(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober"
+    r"|November|Dezember|Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag"
+    r"|Sonntag)\b",
+    re.MULTILINE)
 
 
 def clamp(n):
@@ -66,20 +91,21 @@ def check_burstiness(text):
         return 50.0, "too short to judge"
     mean = statistics.mean(lens)
     cv = statistics.pstdev(lens) / mean if mean else 0
-    score = scale(cv, human=0.70, machine=0.22)
-    return score, f"variation {cv:.2f} across {len(lens)} sentences (want 0.55+)"
+    score = scale(cv, human=0.60, machine=0.22)
+    return score, f"variation {cv:.2f} across {len(lens)} sentences (want 0.45+)"
 
 
-def check_specificity(text):
+def check_specificity(text, lex):
     """Numbers, names and concrete nouns. Slop is abstract."""
     w = words(text)
     if len(w) < 25:
         return 50.0, "too short to judge"
     per100 = 100 / len(w)
-    hits = len(NUMBERS.findall(text)) + len(set(PROPER.findall(text)))
+    names = {n for n in lex.get("names", []) if re.search(rf"\b{re.escape(n)}\b", text)}
+    hits = len(NUMBERS.findall(text)) + len(set(PROPER.findall(text))) + len(names)
     density = hits * per100
-    score = scale(density, human=6.0, machine=0.5)
-    return score, f"{hits} concrete markers, {density:.1f} per 100 words (want 4+)"
+    score = scale(density, human=2.5, machine=0.0)
+    return score, f"{hits} concrete markers, {density:.1f} per 100 words (want 1.5+)"
 
 
 def check_slop(text, lex):
@@ -138,8 +164,8 @@ def check_voice(text, lex):
             names.append(s["id"])
     bullets = [len(b.split()) for b in re.findall(r"(?m)^\s*[-*•]\s+(.+)$", text)]
     uniform = (len(bullets) >= 3 and statistics.pstdev(bullets) < 1.6)
-    score = (scale(contractions, human=3.0, machine=0.0) * 0.35
-             + scale(person, human=8.0, machine=1.0) * 0.35
+    score = (scale(contractions, human=1.5, machine=0.0) * 0.35
+             + scale(person, human=5.0, machine=1.0) * 0.35
              + clamp(100 - tells * 22) * 0.30)
     if uniform:
         score -= 12
@@ -157,7 +183,7 @@ CHECKS = ["BURSTINESS", "SPECIFICITY", "SLOP DENSITY", "FINGERPRINT", "VOICE"]
 def run(text, lex):
     results = {}
     results["BURSTINESS"] = check_burstiness(text)
-    results["SPECIFICITY"] = check_specificity(text)
+    results["SPECIFICITY"] = check_specificity(text, lex)
     results["SLOP DENSITY"] = check_slop(text, lex)
     results["FINGERPRINT"] = check_fingerprint(text)
     results["VOICE"] = check_voice(text, lex)
