@@ -32,6 +32,9 @@ import unicodedata
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEX = os.path.join(HERE, "slop.json")
 
+sys.path.insert(0, HERE)
+from humanize import term_label, term_pattern  # noqa: E402
+
 SENT_RE = re.compile(r"[^.!?\n]+[.!?]*")
 WORD_RE = re.compile(r"[A-Za-zÄÖÜäöüß']+")
 # German has no mandatory contractions, so colloquial forms count too:
@@ -115,12 +118,10 @@ def check_slop(text, lex):
         return 50.0, "empty"
     hits, found = 0, []
     for entry in lex["words"] + lex["phrases"]:
-        pattern = re.compile(r"\b" + re.escape(entry["find"]).replace(r"\ ", r"\s+") + r"\b",
-                             re.IGNORECASE)
-        n = len(pattern.findall(text))
+        n = len(term_pattern(entry["find"]).findall(text))
         if n:
             hits += n
-            found.append(entry["find"])
+            found.append(term_label(entry["find"]))
     density = hits * 100 / len(w)
     score = scale(density, human=0.0, machine=4.0)
     detail = f"{hits} stock terms, {density:.1f} per 100 words"
