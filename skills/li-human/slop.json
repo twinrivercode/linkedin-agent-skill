@@ -73,7 +73,7 @@
     { "find": "paradigmenwechsel", "replace": "Veränderung", "family": "nouns" },
     { "find": "wertschöpfung", "replace": "Gewinn", "family": "nouns" }
   ],
-  "names": [],
+  "names": ["Scotty", "brik", "twinriver code"],
   "phrases": [
     { "find": "in der heutigen digitalen welt", "replace": "heute", "family": "phrases" },
     { "find": "in der heutigen schnelllebigen zeit", "replace": "aktuell", "family": "phrases" },
