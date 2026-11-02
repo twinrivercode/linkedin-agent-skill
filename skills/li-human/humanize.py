@@ -39,6 +39,13 @@ LEX = os.path.join(HERE, "slop.json")
 URL_RE = re.compile(r"https?://\S+|www\.\S+|\S+@\S+\.\S+")
 SENT_RE = re.compile(r"[^.!?\n]+[.!?]*")
 
+# Lexicon placeholders for German inflection. "robust{adj}" also matches
+# "robuste" and "robusten"; the ending carries over to {adj} or {v} in the
+# replacement, so "optimierte" -> "verbesserte".
+ENDINGS = {"adj": r"e[mnrs]?",
+           "v": r"end(?:e[mnrs]?)?|en|e|st|et|test|tet|te[mnrs]?|t"}
+PLACEHOLDER = re.compile(r"\{(adj|v)\}")
+
 
 def load_lexicon(path=LEX):
     with open(path, encoding="utf-8") as fh:
@@ -126,6 +133,29 @@ def _match_case(src, repl):
     return repl
 
 
+def term_pattern(find):
+    """Compile a lexicon term, expanding its placeholder into an ending group."""
+    source = ""
+    pos = 0
+    for m in PLACEHOLDER.finditer(find):
+        source += re.escape(find[pos:m.start()])
+        source += rf"(?P<ending>{ENDINGS[m.group(1)]})?"
+        pos = m.end()
+    source += re.escape(find[pos:])
+    return re.compile(r"\b" + source.replace(r"\ ", r"\s+") + r"\b", re.IGNORECASE)
+
+
+def term_label(find):
+    return PLACEHOLDER.sub("", find)
+
+
+def _fill_ending(repl, ending):
+    # Verbs in -ern drop the e: "verbesser" + "en" -> "verbessern".
+    if ending.startswith("en") and "er{v}" in repl:
+        ending = ending[1:]
+    return PLACEHOLDER.sub(ending, repl)
+
+
 def pass_lexical(text, lex):
     """Replace slop words and phrases. Longest first so phrases win."""
     hits = []
@@ -133,14 +163,19 @@ def pass_lexical(text, lex):
                      key=lambda e: len(e["find"]), reverse=True)
     for entry in entries:
         find = entry["find"]
-        pattern = re.compile(r"\b" + re.escape(find).replace(r"\ ", r"\s+") + r"\b",
-                             re.IGNORECASE)
+        pattern = term_pattern(find)
         found = pattern.findall(text)
         if not found:
             continue
-        hits.append({"find": find, "replace": entry["replace"] or "(deleted)",
+        replace = entry["replace"]
+        hits.append({"find": term_label(find),
+                     "replace": term_label(replace) or "(deleted)",
                      "count": len(found), "family": entry["family"]})
-        text = pattern.sub(lambda m: _match_case(m.group(0), entry["replace"]), text)
+        text = pattern.sub(
+            lambda m: _match_case(
+                m.group(0),
+                _fill_ending(replace, m.groupdict().get("ending") or "")),
+            text)
     # Clean up after deletions.
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"(?m)^[ \t]*([,.;:])\s*", "", text)
